@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import pathlib
 
 import google.generativeai as genai
 from aiogram import Bot, Dispatcher, types
@@ -16,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 class GeminiChat:
-    def __init__(self, api_key):
+    def __init__(self, api_key, pdf_path=None):
         genai.configure(api_key=api_key)
         self.default_history = [
             {
@@ -39,6 +40,29 @@ class GeminiChat:
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
+        
+        self.pdf_path = pathlib.Path(pdf_path) if pdf_path else None
+
+        if self.pdf_path and self.pdf_path.exists():
+            self._add_pdf_context_to_history()
+    
+    def _add_pdf_context_to_history(self):
+    try:
+        logging.info(f"Uploading PDF file: {self.pdf_path}")
+        uploaded_file = genai.upload_file(self.pdf_path)
+        logging.info(f"PDF successfully uploaded: {uploaded_file}")
+        pdf_reference = f"PDF-file {self.pdf_path.name} uploaded for analysis."
+
+        self.history.insert(0, {
+            "role": "user",
+            "parts": [
+                pdf_reference,
+                uploaded_file,
+                "Here's PDF file for using it.",
+            ],
+        })
+    except Exception as e:
+        logging.error(f"Error with uploading PDF file: {e}")
 
     def _create_new_chat(self, history):
         model = genai.GenerativeModel(
@@ -80,7 +104,7 @@ class GeminiChat:
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-gemini = GeminiChat(api_key=GEMINI_API_KEY)
+gemini = GeminiChat(api_key=GEMINI_API_KEY, pdf_path=r'path/to/your/file.pdf')
 
 
 @dp.message(CommandStart())
@@ -98,30 +122,33 @@ async def process_link(message: types.Message):
         await message.answer("Error fetching URL.\nTry again later.")
         return
 
-    question_elements = soup.find_all('span', class_='M7eMe')
+    question_divs = soup.find_all('div', class_='Qr7Oae')
 
-    if not question_elements:
+    if not question_divs:
         await message.answer("Error handling Google Forms questions.\nTry again later.")
         return
 
     formatted_questions = ""
-    for i, question in enumerate(question_elements):
-        question_text = question.text.strip().replace(u'\xa0', '')
-        formatted_questions += f"{i + 1}. {question_text}\n"
+    for i, question_div in enumerate(question_divs):
+        question_element = question_div.find('span', class_='M7eMe')
+        if question_element:
+            question_text = question_element.text.strip().replace(u'\xa0', '')
+            formatted_questions += f"{i + 1}. {question_text}\n"
+        else:
+            continue
 
-        parent_div = question.find_parent('div', class_='z12JJ')
-        if parent_div:
-            answer_group_elements = parent_div.find_all('div', class_='SG0AAe')
-            if answer_group_elements:
-                for answer_group in answer_group_elements:
-                    answer_elements = answer_group.find_all('span', class_='aDTYNe snByac OvPDhc OIC90c')
-                    answers_for_group = [answer.text.strip() for answer in answer_elements]
-                    if answers_for_group:
-                        formatted_questions += f"Answers: {', '.join(answers_for_group)}\n"
-                continue
+        answer_elements = question_div.find_all('span', class_='aDTYNe snByac OvPDhc OIC90c')
+        answers_for_group = [answer.text.strip() for answer in answer_elements]
+        if answers_for_group:
+            formatted_questions += f"Answers: {', '.join(answers_for_group)}\n"
 
-        description_element = question.find_parent('div').find_next_sibling('div', class_='gubaDc OIC90c RjsPE')
-        if description_element:
+        list_elements = question_div.find_all('div', class_='eBFwI')
+        answers_for_group = [answer.text.strip() for answer in list_elements]
+        if answers_for_group:
+            formatted_questions += f"Answers (multiple choice): {', '.join(answers_for_group)}\n"
+
+        description_element = question_div.find_next_sibling('div', class_='gubaDc OIC90c RjsPE')
+        if description_element and description_element.text.strip() != '':
             formatted_questions += f"Description: {description_element.text.strip()}\n"
 
     try:

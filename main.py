@@ -73,28 +73,36 @@ async def main():
     link = 'your_google_form_link'
     soup = BeautifulSoup(requests.get(link).text, "html.parser")
 
-    question_elements = soup.find_all('span', class_='M7eMe')
-    answer_group_elements = soup.find_all('div', class_='SG0AAe')
+    question_divs = soup.find_all('div', class_='Qr7Oae')
 
-    questions = []
-    for question in question_elements:
-        questions.append(question.text.strip().replace(u'\xa0', ''))
-
-    all_answers = []
-    for answer_group in answer_group_elements:
-        answer_elements = answer_group.find_all('span', class_='aDTYNe snByac OvPDhc OIC90c')
-        answers_for_group = []
-        for answer in answer_elements:
-            answers_for_group.append(answer.text.strip())
-        all_answers.append(answers_for_group)
-
-    parsed_text = list(zip(questions, all_answers))
-
-    gemini = GeminiChat()
+    if not question_divs:
+        print("Error handling Google Forms questions.\nTry again later.")
+        return
 
     formatted_questions = ""
-    for i, (question, answers) in enumerate(parsed_text):
-        formatted_questions += f"{i + 1}. {question}\nAnswers: {', '.join(answers)}\n"
+    for i, question_div in enumerate(question_divs):
+        question_element = question_div.find('span', class_='M7eMe')
+        if question_element:
+            question_text = question_element.text.strip().replace(u'\xa0', '')
+            formatted_questions += f"{i + 1}. {question_text}\n"
+        else:
+            continue
+
+        answer_elements = question_div.find_all('span', class_='aDTYNe snByac OvPDhc OIC90c')
+        answers_for_group = [answer.text.strip() for answer in answer_elements]
+        if answers_for_group:
+            formatted_questions += f"Answers: {', '.join(answers_for_group)}\n"
+
+        list_elements = question_div.find_all('div', class_='eBFwI')
+        answers_for_group = [answer.text.strip() for answer in list_elements]
+        if answers_for_group:
+            formatted_questions += f"Answers (multiple choice): {', '.join(answers_for_group)}\n"
+
+        description_element = question_div.find_next_sibling('div', class_='gubaDc OIC90c RjsPE')
+        if description_element and description_element.text.strip() != '':
+            formatted_questions += f"Description: {description_element.text.strip()}\n"
+
+    gemini = GeminiChat()
 
     response = await gemini.generate_response(formatted_questions)
     print(response)
